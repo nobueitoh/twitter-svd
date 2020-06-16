@@ -9,7 +9,7 @@ import sys, twitter, configparser
 import numpy as np
 import scipy.sparse as sparse
 from sklearn.decomposition import TruncatedSVD
-from sklearn.feature_extraction.text import HashingVectorizer
+from sklearn.feature_extraction.text import HashingVectorizer, TfidfVectorizer
 from nltk.tokenize import TweetTokenizer
 from nltk.corpus import stopwords
 
@@ -18,14 +18,16 @@ def preprocess(text):
     return [i for i in tok.tokenize(text) if i not in stopwords.words()]
 
 class TweetStream(QtCore.QThread):
-    svd_signal = QtCore.pyqtSignal('PyQt_PyObject')
+    #svd_signal = QtCore.pyqtSignal('PyQt_PyObject')
     twt_signal = QtCore.pyqtSignal('PyQt_PyObject')
     def __init__(self, parent=None):
         QtCore.QThread.__init__(self, parent)
         self.svd = TruncatedSVD(n_components=3)
-        self.hash = HashingVectorizer(tokenizer=preprocess,
-                ngram_range=(1,1))
-        self.data = None
+        #self.hash = HashingVectorizer(tokenizer=preprocess,
+        #        ngram_range=(1,1))
+        self.hash = TfidfVectorizer(tokenizer=preprocess,
+                ngram_range=(3,3))
+        self.data = None#sparse.load_npz('tweets.npz')
 
     def run(self):
         config = configparser.ConfigParser()
@@ -37,14 +39,14 @@ class TweetStream(QtCore.QThread):
                 access_token_secret=config['access_token_secret'])
 
         for n, line in enumerate(api.GetStreamFilter(
-                track=['pokemon','dark souls','darksouls','sonic','hedgehog'],
+                track=['nintendo','microsoft','sony'],
                 languages=['en'])):
             if self.isInterruptionRequested():
                 print('saving data...')
-                np.save('tweets.npy', self.data)
+                sparse.save_npz('tweets.npz', self.data)
                 return
             try:
-                v = self.hash.transform((line['text'],))
+                v = self.hash.fit_transform((line['text'],))
                 self.twt_signal.emit(line['text'])
                 if self.data == None:
                     self.data = sparse.csr_matrix(v)
@@ -53,6 +55,7 @@ class TweetStream(QtCore.QThread):
                 else:
                     self.data = sparse.vstack((self.data, v))
                     trans = self.svd.fit_transform(self.data)
+                    print(self.svd.explained_variance_)
                     self.svd_signal.emit(trans)
             except KeyError:
                 pass
@@ -93,6 +96,7 @@ class App(QtWidgets.QMainWindow, Ui_MainWindow):
             self.tweets.start()
             self.started = True
         else:
+            self.tweets.requestInterruption()
             self.tweets.quit()
             self.started = False
 
